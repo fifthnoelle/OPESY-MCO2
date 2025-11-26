@@ -1,0 +1,19 @@
+CPU Utilization: 0.00%
+Cores used: 0
+Cores available: 16
+---------------------------------------------------
+Running Processes:
+
+Finished Processes:
+process01	(11/05/2025 11:45:50PM)	Finished	5000 / 5000
+process02	(11/05/2025 11:45:51PM)	Finished	5000 / 5000
+process03	(11/05/2025 11:45:52PM)	Finished	5000 / 5000
+process04	(11/05/2025 11:45:53PM)	Finished	5000 / 5000
+process05	(11/05/2025 11:45:54PM)	Finished	5000 / 5000
+process06	(11/05/2025 11:45:55PM)	Finished	5000 / 5000
+process07	(11/05/2025 11:45:56PM)	Finished	5000 / 5000
+process08	(11/05/2025 11:45:57PM)	Finished	5000 / 5000
+process09	(11/05/2025 11:45:58PM)	Finished	5000 / 5000
+process10	(11/05/2025 11:45:59PM)	Finished	5000 / 5000
+process11	(11/05/2025 11:46:00PM)	Finished	5000 / 5000
+---------------------------------------------------

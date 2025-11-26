@@ -1,0 +1,28 @@
+configuring both:
+
+FOR FCFS
+num-cpu 2
+scheduler "fcfs"
+batch-process-freq 1
+min-ins 50
+max-ins 100
+delay-per-exec 50
+
+FOR ROUND ROBIN
+//orig
+num-cpu 4
+scheduler "rr"
+quantum-cycles 5
+batch-process-freq 1
+min-ins 1000
+max-ins 2000
+delay-per-exec 0
+
+//new
+num-cpu 2
+scheduler "rr"
+quantum-cycles 5
+batch-process-freq 1
+min-ins 50
+max-ins 100
+delay-per-exec 50

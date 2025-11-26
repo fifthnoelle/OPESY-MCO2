@@ -1,0 +1,19 @@
+initialize
+screen -s p1
+declare
+a
+1
+for 10
+exit
+screen -s p2
+declare
+b
+2
+for 8
+exit
+scheduler-start
+screen -r p1
+exit
+scheduler-stop
+report-util
+type csopesy-log.txt
