@@ -11,13 +11,17 @@
 using namespace std;
 
 struct Config {
-    int num_cpu = 1;                    // [1,128]
-    string scheduler = "rr";            // "fcfs" or "rr"
-    uint32_t quantum_cycles = 5;        // [1, 2^32-1]
-    uint32_t batch_process_freq = 1;    // [1, 2^32-1]
-    uint32_t min_ins = 1;               // [1, 2^32-1]
-    uint32_t max_ins = 1;               // [1, 2^32-1]
-    uint32_t delay_per_exec = 0;        // [0, 2^32-1]
+    int num_cpu = 1;                    //[1,128]
+    string scheduler = "rr";            //"fcfs" or "rr"
+    uint32_t quantum_cycles = 5;        //[1, 2^32-1]
+    uint32_t batch_process_freq = 1;    //[1, 2^32-1]
+    uint32_t min_ins = 1;               //[1, 2^32-1]
+    uint32_t max_ins = 1;               //[1, 2^32-1]
+    uint32_t delay_per_exec = 0;        //[0, 2^32-1]
+    uint32_t max_overall_mem = 65536;   //[2^6, 2^16] power of 2 format
+    uint32_t mem_per_frame = 256;       //[2^6, 2^16] power of 2 format
+    uint32_t min_mem_per_proc = 256;    //[2^6, 2^16] power of 2 format
+    uint32_t max_mem_per_proc = 4096;   //[2^6, 2^16] power of 2 format
 };
 
 static inline bool clamp_int(int &v, int lo, int hi) {
@@ -100,15 +104,31 @@ static inline optional<string> load_config_from_file(const string &path, Config 
                 uint32_t v = static_cast<uint32_t>(stoul(val));
                 out.delay_per_exec = v;
             }
+            else if (key == "max-overall-mem") {
+                uint32_t v = static_cast<uint32_t>(stoul(val));
+                out.max_overall_mem = v;
+            }
+            else if (key == "mem-per-frame") {
+                uint32_t v = static_cast<uint32_t>(stoul(val));
+                out.mem_per_frame = v;
+            }
+            else if (key == "min-mem-per-proc") {
+                uint32_t v = static_cast<uint32_t>(stoul(val));
+                out.min_mem_per_proc = v;
+            }
+            else if (key == "max-mem-per-proc") {
+                uint32_t v = static_cast<uint32_t>(stoul(val));
+                out.max_mem_per_proc = v;
+            }
         } catch (...) {
             return optional<string>("parse-error");
         }
     }
     
-    // Ensure max_ins >= min_ins
+    //Ensure max_ins >= min_ins
     if (out.max_ins < out.min_ins) out.max_ins = out.min_ins;
     
-    return nullopt;  // Success (no error)
+    return nullopt;  //Success (no error)
 }
 
 #endif
