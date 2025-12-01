@@ -1,9 +1,7 @@
-//g++ -std=c++17 -O2 -pthread -o osemulator.exe osemulator.cpp
-// NEW COMMAND:
-// g++ -std=c++17 -O2 -pthread -o osemulator.exe osemulator.cpp MemoryManager.cpp
+//g++ -std=c++17 -O2 -pthread -o osemulator.exe osemulator.cpp MemoryManager.cpp
 //.\osemulator.exe
 
-/**Need to show in process the lines of code, etc. */
+/** Need to show in process the lines of code, etc. */
 #include <iostream>
 #include <sstream>
 #include <map>
@@ -15,33 +13,35 @@
 #include <fstream>
 #include <chrono>
 #include <iomanip>
+#include <algorithm>
+
 #include "config.h"
 #include "process.h"
 #include "scheduler.h"
 #include "MemoryManager.h"
 
-
 using namespace std;
 std::atomic<int> active_cores{0};
 
 // Memory statistics
-static atomic<uint64_t> total_memory{0};
-static atomic<uint64_t> used_memory{0};
-static atomic<uint64_t> free_memory{0};
+std::atomic<uint64_t> total_memory{0};
+std::atomic<uint64_t> used_memory{0};
+std::atomic<uint64_t> free_memory{0};
 
-atomic<uint64_t> idle_ticks{0};
-atomic<uint64_t> active_ticks{0};
-atomic<uint64_t> total_ticks{0};
-atomic<uint64_t> num_paged_in{0};
-atomic<uint64_t> num_paged_out{0};
+// VMSTAT counters (non-static so other translation units can extern them)
+std::atomic<uint64_t> idle_ticks{0};
+std::atomic<uint64_t> active_ticks{0};
+std::atomic<uint64_t> total_ticks{0};
+std::atomic<uint64_t> num_paged_in{0};
+std::atomic<uint64_t> num_paged_out{0};
 
 //ProcessStub and repository helpers are provided in process.h
 
 //Config (from config.txt after initialization)
 static Config global_config;
 static bool initialized = false;
-static unique_ptr<Scheduler> scheduler; 
-//static unique_ptr<MemoryManager> mem_manager;
+static unique_ptr<Scheduler> scheduler;
+//std::unique_ptr<MemoryManager> mem_manager;
 
 /*
 Use these to pass config values for scheduler
@@ -61,38 +61,16 @@ static  condition_variable_any scheduler_cv;
 
 //Util for clearing console
 static void clear_console() {
-    //Clear screen, implement later?
-    //for (int i = 0; i < 60; ++i)  cout << '\n';
     cout << string(50, '\n');
 }
 
-//This is not a real scheduler, just simulating process creation and finishing, pls delete later
-static void scheduler_loop() {
-    int counter = 0;
-    while (scheduler_running.load()) {
-        this_thread::sleep_for(chrono::milliseconds(global_config.batch_process_freq));
-
-        string name = gen_auto_name();
-        auto p = create_process(name);
-        if (scheduler) scheduler->add_process(p);
-
-        // Random instruction count between min and max
-        int num_ins = global_config.min_ins + rand() % (global_config.max_ins - global_config.min_ins + 1);
-
-        // Fill with dummy instructions
-        generate_dummy_instructions(p, num_ins);
-
-        //scheduler.enqueue(p); // Send to Scheduler queue
-
-        cout << "[Scheduler] Generated process " << name
-             << " with " << num_ins << " instructions." << endl;
-    }
-}
+// Forward-declare vmstat so it's callable inside screen
+static void vmstat();
 
 //Print summary works for displaying and writing to file
 static void print_summary(ostream &out) {
     extern atomic<int> active_cores;
-    double utilization = (100.0 * active_cores.load()) / global_config.num_cpu;
+    double utilization = (global_config.num_cpu > 0) ? (100.0 * active_cores.load()) / global_config.num_cpu : 0.0;
     
     out << fixed << setprecision(2);
     out << "CPU Utilization: " << utilization << "%" << endl;
@@ -137,33 +115,29 @@ static void print_summary(ostream &out) {
 
 //Save summary to file for report-util
 static void save_report_util(const  string &path) {
-     ofstream ofs(path);
+    ofstream ofs(path);
     if (!ofs) {
-         cout << "Failed to open " << path << " for writing." <<  endl;
+        cout << "Failed to open " << path << " for writing." <<  endl;
         return;
     }
     print_summary(ofs);
     ofs.close();
-     cout << "Saved report to " << path <<  endl;
+    cout << "Saved report to " << path <<  endl;
 }
 
 static void print_process(const  shared_ptr<ProcessStub>& p) {
-
+    if (!p) return;
     CustomProcessLines cpl;
     cout << "\nProcess name: " << p->name <<  endl;
     cout << "ID: " << p->id <<  endl;
     cout << "Logs: " <<  endl;
     {
-         lock_guard< mutex> plk(p->mtx);
+        lock_guard< mutex> plk(p->mtx);
         for (const auto &entry : p->logs) {
-             cout << "(" << entry.timestamp << ")";
-             cout << "\t\"" << entry.message << "\"" <<  endl;
+            cout << "(" << entry.timestamp << ")";
+            cout << "\t\"" << entry.message << "\"" <<  endl;
         }
     }
-    //cout << "\nCurrent Instruction Line:\n";
-    //for (size_t i = 0; i < p->code.runningLines.size(); ++i) {
-    //    cout << (i + 1) << "     " << p->code.runningLines[i] << endl;
-    //}
 
     cout << "\nLines of Code:\n";
     for (size_t i = 0; i < p->code.lines.size(); ++i) {
@@ -197,14 +171,11 @@ static void run_process_screen(const string& process_name) {
     while (true) {
         cout << "root:\\" << process_name << "\\> " << flush;
 
-        // read the whole command line safely
         if (!std::getline(cin, line)) {
-            // EOF or Ctrl+D/Ctrl+Z — exit the screen
             cout << "\nInput closed. Exiting process screen." << endl;
             break;
         }
 
-        // trim leading spaces
         size_t pos = line.find_first_not_of(" \t\r\n");
         if (pos == string::npos) continue;
         if (pos > 0) line = line.substr(pos);
@@ -218,21 +189,14 @@ static void run_process_screen(const string& process_name) {
             break;
         } else if (cmd == "process-smi") {
             print_process(p);
+        } else if (cmd == "vmstat") {
+            // allow vmstat inside screen
+            vmstat();
         } else if (cmd == "declare") {
             string var, val_str;
-            //cout << "[DEBUG] Entering declare command...\n";
-            //cout.flush();
-
             cout << "Enter variable name: ";
             cout.flush();
-            if (!getline(cin, var)) {
-                //cout << "[DEBUG] getline for var failed\n";
-                cout << "Input aborted.\n";
-                continue;
-            }
-            //cout << "[DEBUG] Raw var input: '" << var << "'\n";
-
-            // trim spaces
+            if (!getline(cin, var)) { cout << "Input aborted.\n"; continue; }
             auto trim = [](string &s) {
                 size_t start = s.find_first_not_of(" \t\r\n");
                 size_t end = s.find_last_not_of(" \t\r\n");
@@ -240,63 +204,43 @@ static void run_process_screen(const string& process_name) {
                 s = s.substr(start, end - start + 1);
             };
             trim(var);
-            //cout << "[DEBUG] Trimmed var: '" << var << "'\n";
-
-            if (var.empty()) {
-                cout << "Invalid variable name.\n";
-                continue;
-            }
+            if (var.empty()) { cout << "Invalid variable name.\n"; continue; }
 
             cout << "Enter value: ";
             cout.flush();
-            if (!getline(cin, val_str)) {
-                //cout << "[DEBUG] getline for value failed\n";
-                cout << "Input aborted.\n";
-                continue;
-            }
-            //cout << "[DEBUG] Raw value input: '" << val_str << "'\n";
+            if (!getline(cin, val_str)) { cout << "Input aborted.\n"; continue; }
             trim(val_str);
-            //cout << "[DEBUG] Trimmed value: '" << val_str << "'\n";
-
-            if (val_str.empty()) {
-                cout << "Invalid value.\n";
-                continue;
-            }
+            if (val_str.empty()) { cout << "Invalid value.\n"; continue; }
 
             try {
                 int val = stoi(val_str);
 
-                // Safely store variable
                 {
                     lock_guard<mutex> lk(p->mtx);
-                    p->vars[var] = static_cast<uint16_t>(val);
+                    // symbol table limit: 32 variables
+                    if (p->vars.size() >= 32) {
+                        cout << "Symbol table full (32 variables). Declaration ignored.\n";
+                    } else {
+                        p->vars[var] = static_cast<uint16_t>(max(0, min(65535, val)));
+                        add_log(p, "Declared " + var + " = " + to_string(val));
+                        ostringstream linebuf;
+                        linebuf << "DECLARE:        uint16_t " << var << " = " << val << ";";
+                        p->code.lines.push_back(linebuf.str());
+                        p->total_instructions = static_cast<int>(p->code.lines.size());
+                        cout << "Variable '" << var << "' = " << val << " declared successfully." << endl;
+                    }
                 }
-
-                // Log (this function already locks its own mutex)
-                add_log(p, "Declared " + var + " = " + to_string(val));
-
-                // Safely append to code lines
-                {
-                    lock_guard<mutex> lk(p->mtx);
-                    ostringstream linebuf;
-                    linebuf << "DECLARE:        uint16_t " << var << " = " << val << ";";
-                    p->code.lines.push_back(linebuf.str());
-                }
-
-                cout << "Variable '" << var << "' = " << val << " declared successfully." << endl;
             }
             catch (const exception &e) {
                 cout << "Invalid value: must be an integer. (" << e.what() << ")\n";
             }
 
         } else if (cmd == "print") {
-            // allow "print hello" OR interactive
             string rest;
             if (!getline(ss, rest) || rest.find_first_not_of(" \t\r\n") == string::npos) {
                 cout << "Enter message to PRINT: " << flush;
                 if (!getline(cin, rest)) break;
             }
-            // trim leading spaces
             size_t s = rest.find_first_not_of(" \t\r\n");
             if (s != string::npos) rest = rest.substr(s);
             add_log(p, string("PRINT:       ") + rest);
@@ -304,44 +248,62 @@ static void run_process_screen(const string& process_name) {
             linebuf << "PRINT:      " << rest;
             lock_guard<mutex> lk(p->mtx);
             p->code.lines.push_back(linebuf.str());
+            p->total_instructions = static_cast<int>(p->code.lines.size());
             cout << "Printed message logged." << endl;
 
         } else if (cmd == "read") {
-            // usage: read <var> <hexaddress>   e.g. read myvar 0x100
+            // usage: read <var> <hexaddress>
             string var, addrstr;
             if (!(ss >> var >> addrstr)) {
-                cout << "Usage: read <var> <hexaddress>\n";
+                cout << "Usage: read <var> <hexaddress>\n" << flush;
                 continue;
             }
-            // parse hex
+
             uint32_t addr = 0;
-            try {
-                addr = std::stoul(addrstr, nullptr, 0);
-            } catch (...) { cout << "Invalid address\n"; continue; }
+            try { addr = std::stoul(addrstr, nullptr, 0); } catch (...) { 
+                cout << "Invalid address\n" << flush; 
+                continue; 
+            }
+
+            if (!mem_manager) {
+                cout << "Memory manager not available\n" << flush;
+                continue;
+            }
 
             uint16_t val = 0;
-            if (!mem_manager) { cout << "Memory manager not available\n"; continue; }
-            if (!mem_manager->read_u16(p, addr, val)) {
-                cout << "Memory access violation at " << addrstr << endl;
-                // crash process: mark finished & record crash info if desired
+            bool ok = mem_manager->read_u16(p, addr, val); // make sure you have this function
+
+            if (!ok) {
+                cout << "Memory access violation at " << addrstr << "\n" << flush;
                 p->finished.store(true);
                 add_log(p, string("Memory access violation at ") + addrstr);
+
                 // reclaim memory
                 mem_manager->free_process(p);
                 used_memory -= p->memory_required;
                 free_memory += p->memory_required;
-                cout << "Process " << p->name << " shut down due to memory access violation error at " << timestamp_now() << ". " << addrstr << " invalid." << endl;
+
+                cout << "Process " << p->name << " shut down due to memory access violation.\n";
                 break;
             }
-            // store in variable
+
             {
                 lock_guard<mutex> lk(p->mtx);
-                p->vars[var] = val;
+                // store only if table has space
+                if (p->vars.size() < 32) {
+                    p->vars[var] = val;
+                } else {
+                    cout << "[Warning] Symbol table full (32 variables). Value not stored, but read will display.\n";
+                }
+
+                add_log(p, string("READ: ") + var + " <- " + to_string(val));
+
+                // always print
+                cout << var << " = " << val << endl;
+                cout.flush();
+                fflush(stdout);
             }
-            add_log(p, string("READ: ") + var + " <- " + to_string(val));
-            cout << var << " = " << val << endl;
-        }
-        else if (cmd == "write") {
+        } else if (cmd == "write") {
             // usage: write <hexaddress> <value>
             string addrstr, valstr;
             if (!(ss >> addrstr >> valstr)) {
@@ -349,9 +311,7 @@ static void run_process_screen(const string& process_name) {
                 continue;
             }
             uint32_t addr = 0;
-            try {
-                addr = std::stoul(addrstr, nullptr, 0);
-            } catch (...) { cout << "Invalid address\n"; continue; }
+            try { addr = std::stoul(addrstr, nullptr, 0); } catch (...) { cout << "Invalid address\n"; continue; }
             int v = 0;
             try { v = stoi(valstr); } catch(...) { cout << "Invalid value\n"; continue; }
             uint16_t uv = static_cast<uint16_t>(std::max(0, std::min(65535, v)));
@@ -381,12 +341,12 @@ static void run_process_screen(const string& process_name) {
                 add_log(p, "SLEEP end");
                 lock_guard<mutex> lk(p->mtx);
                 p->code.lines.push_back(string("SLEEP:      ") + to_string(t) + "ms");
+                p->total_instructions = static_cast<int>(p->code.lines.size());
                 cout << "Slept " << t << " ms." << endl;
             } catch (...) {
                 cout << "Invalid number." << endl;
             }
         } else if (cmd == "for") {
-            // simple interactive for-loop emulation
             string countstr;
             if (!(ss >> countstr)) {
                 cout << "Enter repeat count: " << flush;
@@ -402,6 +362,7 @@ static void run_process_screen(const string& process_name) {
             add_log(p, "FOR end");
             lock_guard<mutex> lk(p->mtx);
             p->code.lines.push_back(string("FOR x") + to_string(cnt));
+            p->total_instructions = static_cast<int>(p->code.lines.size());
             cout << "For loop executed " << cnt << " times." << endl;
         } else if (cmd == "add" || cmd == "sub") {
             string var1, var2, var3;
@@ -421,7 +382,7 @@ static void run_process_screen(const string& process_name) {
             trim(var1); trim(var2); trim(var3);
             if (var1.empty() || var2.empty() || var3.empty()) {
                 cout << "Invalid input.\n"; 
-                return;
+                continue;
             }
 
             auto get_val = [&](const string &s) -> uint16_t {
@@ -443,20 +404,18 @@ static void run_process_screen(const string& process_name) {
                 ? static_cast<uint16_t>(min(65535, (int)v2 + (int)v3))
                 : static_cast<uint16_t>((v2 > v3) ? (v2 - v3) : 0);
 
-            // Update variables and code under one lock
             {
                 lock_guard<mutex> lk(p->mtx);
                 p->vars[var1] = result;
-
                 ostringstream linebuf;
                 linebuf << (cmd=="add"?"ADD":"SUB") << ": "
                         << var1 << " = " << var2 << " "
                         << (cmd=="add"?"+":"-") << " "
                         << var3 << " -> " << result;
                 p->code.lines.push_back(linebuf.str());
+                p->total_instructions = static_cast<int>(p->code.lines.size());
             }
 
-            // Add log AFTER unlocking to avoid recursive locking
             add_log(p, (cmd == "add" ? "ADD:        " : "SUB:       ") + 
                     var1 + " = " + var2 + 
                     (cmd=="add"?" + ":" - ") + 
@@ -467,7 +426,7 @@ static void run_process_screen(const string& process_name) {
         }
 
         else {
-            cout << "Unknown command inside screen. Available: process-smi, exit, declare, add, sub, print, sleep, for" << endl;
+            cout << "Unknown command inside screen. Available: process-smi, vmstat, exit, declare, add, sub, print, sleep, for, read, write" << endl;
         }
     }
 
@@ -498,18 +457,18 @@ static void vmstat() {
 
 //Main menu loop
 static void run_main_menu() {
-     string command;
+    string command;
 
     cout << "Welcome to CSOPESY!" <<  endl;
-    cout << "Version Date: November 3, 2025" <<  endl <<  endl;
+    cout << "Version Date: December 1, 2025" <<  endl <<  endl;
     cout.flush();
 
     while (true) {
         cout << "root:\\> " << flush;
         if (! getline( cin, command)) break;
 
-         stringstream ss(command);
-         string root;
+        stringstream ss(command);
+        string root;
         ss >> root;
         if (root.empty()) continue;
 
@@ -526,17 +485,17 @@ static void run_main_menu() {
             //Load config.txt
             auto err = load_config_from_file("config.txt", global_config);
             if (err.has_value()) {
-                 cout << "Failed to initialize: " << err.value() <<  endl;
+                cout << "Failed to initialize: " << err.value() <<  endl;
             } else {
                 initialized = true;
-                 cout << "Initialized from config.txt" <<  endl;
-                 cout << " num-cpu=" << global_config.num_cpu  <<  endl;
-                 cout << " scheduler=" << global_config.scheduler <<  endl;
-                 cout << " quantum-cycles=" << global_config.quantum_cycles <<  endl;
-                 cout << " batch-process-freq=" << global_config.batch_process_freq <<  endl;
-                 cout << " min-ins=" << global_config.min_ins <<  endl;
-                 cout << " max-ins=" << global_config.max_ins <<  endl;
-                 cout << " delay-per-exec=" << global_config.delay_per_exec <<  endl;
+                cout << "Initialized from config.txt" <<  endl;
+                cout << " num-cpu=" << global_config.num_cpu  <<  endl;
+                cout << " scheduler=" << global_config.scheduler <<  endl;
+                cout << " quantum-cycles=" << global_config.quantum_cycles <<  endl;
+                cout << " batch-process-freq=" << global_config.batch_process_freq <<  endl;
+                cout << " min-ins=" << global_config.min_ins <<  endl;
+                cout << " max-ins=" << global_config.max_ins <<  endl;
+                cout << " delay-per-exec=" << global_config.delay_per_exec <<  endl;
 
                 total_memory.store(global_config.max_overall_mem);
                 free_memory.store(global_config.max_overall_mem);
@@ -553,12 +512,12 @@ static void run_main_menu() {
         }
 
         if (!initialized && root != "exit") {
-             cout << "Error: Must run 'initialize' first." <<  endl;
+            cout << "Error: Must run 'initialize' first." <<  endl;
             continue;
         }
 
         if (root == "screen") {
-             string opt;
+            string opt;
             ss >> opt;
             if (opt == "-s") {
                 string pname; 
@@ -601,10 +560,10 @@ static void run_main_menu() {
                 continue;
             }
             else if (opt == "-r") {
-                 string pname;
+                string pname;
                 ss >> pname;
                 if (pname.empty()) {
-                     cout << "Usage: screen -r <process_name>" <<  endl;
+                    cout << "Usage: screen -r <process_name>" <<  endl;
                 } else {
                     run_process_screen(pname);
                 }
@@ -668,8 +627,10 @@ static void run_main_menu() {
                 free_memory -= mem;
 
                 // ADD INSTRUCTIONS TO CODE
-                for (auto &i : ins_list)
+                for (auto &i : ins_list) {
                     p->code.lines.push_back(i);
+                }
+                p->total_instructions = static_cast<int>(p->code.lines.size());
 
                 cout << "Process " << pname << " created with custom instructions." << endl;
                 continue;
@@ -677,7 +638,7 @@ static void run_main_menu() {
             else if (opt == "-ls") {
                 print_summary( cout);
             } else {
-                 cout << "screen commands: -s <name> (create+attach), -r <name> (attach), -ls (list)" <<  endl;
+                cout << "screen commands: -s <name> (create+attach), -r <name> (attach), -c <name> <mem> \"instr...\" , -ls (list)" <<  endl;
             }
             continue;
         }
@@ -687,8 +648,6 @@ static void run_main_menu() {
                 cout << "Scheduler already running." << endl;
             } else {
                 scheduler_running.store(true);
-                // scheduler_thread = thread([](){ scheduler_loop(500); });  // temporarily disabled to prevent input freezing
-                //cout << "Scheduler started (simulated)." << endl;
                 if (scheduler) scheduler->start();
                 cout << "Scheduler started." << endl;
             }
@@ -714,13 +673,11 @@ static void run_main_menu() {
             continue;
         }
 
-         cout << "Unknown command. Available: initialize, exit, screen, scheduler-start, scheduler-stop, report-util" <<  endl;
+        cout << "Unknown command. Available: initialize, exit, screen, scheduler-start, scheduler-stop, report-util, vmstat" <<  endl;
     }
 }
 
 int main() {
-    //May init dito for config and scheduler
-
     run_main_menu();
     return 0;
 }
