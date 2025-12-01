@@ -47,6 +47,11 @@ struct ProcessStub {
 
     int num_pages = 0;
     std::vector<int> page_table;
+    
+    // Memory access violation tracking
+    atomic<bool> has_violation{false};
+    string violation_timestamp;
+    uint32_t violation_address = 0;
 };
 
 inline map<string, shared_ptr<ProcessStub>> processes;
