@@ -330,7 +330,7 @@ static void run_process_screen(const string& process_name) {
                 mem_manager->free_process(p);
                 used_memory -= p->memory_required;
                 free_memory += p->memory_required;
-                cout << "Process " << p->name << " shut down due to memory access violation error at " << timestamp_now() << ". " << addrstr << " invalid." << endl;
+                cout << "Process " << p->name << " shut down due to memory access violation error error that occurred at 
                 break;
             }
             // store in variable
