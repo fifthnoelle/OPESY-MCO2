@@ -10,10 +10,19 @@
 #include <chrono>
 #include "process.h"
 #include "config.h"
+#include "MemoryManager.h"
+extern std::unique_ptr<MemoryManager> mem_manager;
 
 using namespace std;
 
 extern atomic<int> active_cores;
+
+// VMSTAT globals (defined in osemulator.cpp)
+extern atomic<uint64_t> idle_ticks;
+extern atomic<uint64_t> active_ticks;
+extern atomic<uint64_t> total_ticks;
+extern atomic<uint64_t> num_paged_in;
+extern atomic<uint64_t> num_paged_out;
 
 class Scheduler {
 private:
@@ -94,6 +103,12 @@ private:
     }
 
     void core_loop(int core_id) {
+        total_ticks++;
+        if (ready_queue.empty())
+            idle_ticks++;
+        else
+            active_ticks++;
+
         while (running.load()) {
             shared_ptr<ProcessStub> p;
             

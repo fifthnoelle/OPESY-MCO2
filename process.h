@@ -42,6 +42,11 @@ struct ProcessStub {
     int total_instructions{0};
     string created_timestamp;
     atomic<int> assigned_core{-1};  // -1 = not assigned, 0+ = core number
+
+    uint32_t memory_required = 0;
+
+    int num_pages = 0;
+    std::vector<int> page_table;
 };
 
 inline map<string, shared_ptr<ProcessStub>> processes;

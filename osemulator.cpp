@@ -1,4 +1,6 @@
 //g++ -std=c++17 -O2 -pthread -o osemulator.exe osemulator.cpp
+// NEW COMMAND:
+// g++ -std=c++17 -O2 -pthread -o osemulator.exe osemulator.cpp MemoryManager.cpp
 //.\osemulator.exe
 
 /**Need to show in process the lines of code, etc. */
@@ -16,9 +18,22 @@
 #include "config.h"
 #include "process.h"
 #include "scheduler.h"
+#include "MemoryManager.h"
+
 
 using namespace std;
 std::atomic<int> active_cores{0};
+
+// Memory statistics
+static atomic<uint64_t> total_memory{0};
+static atomic<uint64_t> used_memory{0};
+static atomic<uint64_t> free_memory{0};
+
+atomic<uint64_t> idle_ticks{0};
+atomic<uint64_t> active_ticks{0};
+atomic<uint64_t> total_ticks{0};
+atomic<uint64_t> num_paged_in{0};
+atomic<uint64_t> num_paged_out{0};
 
 //ProcessStub and repository helpers are provided in process.h
 
@@ -26,6 +41,7 @@ std::atomic<int> active_cores{0};
 static Config global_config;
 static bool initialized = false;
 static unique_ptr<Scheduler> scheduler; 
+//static unique_ptr<MemoryManager> mem_manager;
 
 /*
 Use these to pass config values for scheduler
@@ -80,6 +96,11 @@ static void print_summary(ostream &out) {
     
     out << fixed << setprecision(2);
     out << "CPU Utilization: " << utilization << "%" << endl;
+    out << "Memory Summary:" << endl;
+    out << "  Total Memory: " << total_memory.load() << " bytes" << endl;
+    out << "  Used Memory : " << used_memory.load() << " bytes" << endl;
+    out << "  Free Memory : " << free_memory.load() << " bytes" << endl;
+    out << "---------------------------------------------------" << endl;
     out << "Cores used: " << active_cores.load() << endl;
     out << "Cores available: " << (global_config.num_cpu - active_cores.load()) << endl;
     out << "---------------------------------------------------" << endl;
@@ -92,6 +113,7 @@ static void print_summary(ostream &out) {
         if (!p->finished.load() && p->assigned_core.load() >= 0) {
             out << p->name << "\t("
                 << p->created_timestamp << ")\t"
+                << "Memory: " << p->memory_required << " bytes\t"
                 << "Core: " << p->assigned_core.load() << "\t"
                 << p->current_instruction.load() << " / " << p->total_instructions
                 << endl;
@@ -104,6 +126,7 @@ static void print_summary(ostream &out) {
         if (p->finished.load()) {
             out << p->name << "\t("
                 << p->created_timestamp << ")\t"
+                << "Memory: " << p->memory_required << " bytes\t"
                 << "Finished\t"
                 << p->total_instructions << " / " << p->total_instructions
                 << endl;
@@ -283,6 +306,68 @@ static void run_process_screen(const string& process_name) {
             p->code.lines.push_back(linebuf.str());
             cout << "Printed message logged." << endl;
 
+        } else if (cmd == "read") {
+            // usage: read <var> <hexaddress>   e.g. read myvar 0x100
+            string var, addrstr;
+            if (!(ss >> var >> addrstr)) {
+                cout << "Usage: read <var> <hexaddress>\n";
+                continue;
+            }
+            // parse hex
+            uint32_t addr = 0;
+            try {
+                addr = std::stoul(addrstr, nullptr, 0);
+            } catch (...) { cout << "Invalid address\n"; continue; }
+
+            uint16_t val = 0;
+            if (!mem_manager) { cout << "Memory manager not available\n"; continue; }
+            if (!mem_manager->read_u16(p, addr, val)) {
+                cout << "Memory access violation at " << addrstr << endl;
+                // crash process: mark finished & record crash info if desired
+                p->finished.store(true);
+                add_log(p, string("Memory access violation at ") + addrstr);
+                // reclaim memory
+                mem_manager->free_process(p);
+                used_memory -= p->memory_required;
+                free_memory += p->memory_required;
+                cout << "Process " << p->name << " shut down due to memory access violation error at " << timestamp_now() << ". " << addrstr << " invalid." << endl;
+                break;
+            }
+            // store in variable
+            {
+                lock_guard<mutex> lk(p->mtx);
+                p->vars[var] = val;
+            }
+            add_log(p, string("READ: ") + var + " <- " + to_string(val));
+            cout << var << " = " << val << endl;
+        }
+        else if (cmd == "write") {
+            // usage: write <hexaddress> <value>
+            string addrstr, valstr;
+            if (!(ss >> addrstr >> valstr)) {
+                cout << "Usage: write <hexaddress> <value>\n";
+                continue;
+            }
+            uint32_t addr = 0;
+            try {
+                addr = std::stoul(addrstr, nullptr, 0);
+            } catch (...) { cout << "Invalid address\n"; continue; }
+            int v = 0;
+            try { v = stoi(valstr); } catch(...) { cout << "Invalid value\n"; continue; }
+            uint16_t uv = static_cast<uint16_t>(std::max(0, std::min(65535, v)));
+            if (!mem_manager) { cout << "Memory manager not available\n"; continue; }
+            if (!mem_manager->write_u16(p, addr, uv)) {
+                cout << "Memory access violation at " << addrstr << endl;
+                p->finished.store(true);
+                add_log(p, string("Memory access violation at ") + addrstr);
+                mem_manager->free_process(p);
+                used_memory -= p->memory_required;
+                free_memory += p->memory_required;
+                cout << "Process " << p->name << " shut down due to memory access violation error at " << timestamp_now() << ". " << addrstr << " invalid." << endl;
+                break;
+            }
+            add_log(p, string("WRITE: ") + addrstr + " <- " + to_string(uv));
+            cout << "Wrote " << uv << " to " << addrstr << endl;
         } else if (cmd == "sleep") {
             string tstr;
             if (!(ss >> tstr)) {
@@ -394,6 +479,23 @@ static void run_process_screen(const string& process_name) {
     clear_console();
 }
 
+static void vmstat() {
+    cout << "===== VMSTAT =====\n";
+    cout << "Total Memory: " << total_memory.load() << " bytes\n";
+    cout << "Used Memory : " << used_memory.load() << " bytes\n";
+    cout << "Free Memory : " << free_memory.load() << " bytes\n\n";
+
+    cout << "CPU Ticks Summary:\n";
+    cout << "  Idle    : " << idle_ticks.load() << endl;
+    cout << "  Active  : " << active_ticks.load() << endl;
+    cout << "  Total   : " << total_ticks.load() << endl;
+
+    cout << "\nPaging:\n";
+    cout << "  Paged In : " << num_paged_in.load() << endl;
+    cout << "  Paged Out: " << num_paged_out.load() << endl;
+    cout << "===================\n";
+}
+
 //Main menu loop
 static void run_main_menu() {
      string command;
@@ -436,6 +538,14 @@ static void run_main_menu() {
                  cout << " max-ins=" << global_config.max_ins <<  endl;
                  cout << " delay-per-exec=" << global_config.delay_per_exec <<  endl;
 
+                total_memory.store(global_config.max_overall_mem);
+                free_memory.store(global_config.max_overall_mem);
+                used_memory.store(0);
+
+                // Initialize memory manager
+                mem_manager = std::make_unique<MemoryManager>();
+                mem_manager->init(global_config.max_overall_mem, global_config.mem_per_frame);
+
                 scheduler = make_unique<Scheduler>(global_config);
                 cout << "Scheduler object created successfully." << endl;
             }
@@ -451,15 +561,46 @@ static void run_main_menu() {
              string opt;
             ss >> opt;
             if (opt == "-s") {
-                 string pname;
-                ss >> pname;
-                if (pname.empty()) {
-                     cout << "Usage: screen -s <process_name>" <<  endl;
-                } else {
-                    create_process(pname);
-                    run_process_screen(pname);
+                string pname; 
+                uint32_t mem;
+                ss >> pname >> mem;
+
+                if (pname.empty() || mem == 0) {
+                    cout << "Usage: screen -s <name> <memory_size>" << endl;
+                    continue;
                 }
-            } else if (opt == "-r") {
+
+                // Validate memory
+                if (mem < 64 || mem > 65536 || (mem & (mem - 1)) != 0) {
+                    cout << "invalid memory allocation" << endl;
+                    continue;
+                }
+
+                auto p = create_process(pname);
+                p->memory_required = mem;
+
+                if (!mem_manager) {
+                    cout << "Memory manager not initialized. Run initialize first." << endl;
+                    continue;
+                }
+                if (!mem_manager->allocate_process(p, mem)) {
+                    cout << "Failed to allocate page table for process." << endl;
+                    continue;
+                }
+
+                // Update memory counters
+                if (free_memory.load() < mem) {
+                    cout << "Not enough memory available." << endl;
+                    continue;
+                }
+
+                used_memory += mem;
+                free_memory -= mem;
+
+                run_process_screen(pname);
+                continue;
+            }
+            else if (opt == "-r") {
                  string pname;
                 ss >> pname;
                 if (pname.empty()) {
@@ -467,7 +608,73 @@ static void run_main_menu() {
                 } else {
                     run_process_screen(pname);
                 }
-            } else if (opt == "-ls") {
+            } else if (opt == "-c") {
+                string pname;
+                uint32_t mem;
+                string instr;
+
+                ss >> pname >> mem;
+                getline(ss, instr); // includes quotes
+                size_t start = instr.find('"');
+                size_t end = instr.find_last_of('"');
+
+                if (start == string::npos || end == string::npos || end <= start)
+                {
+                    cout << "invalid command" << endl;
+                    continue;
+                }
+
+                string full_instructions = instr.substr(start + 1, end - start - 1);
+
+                // Split by semicolon
+                vector<string> ins_list;
+                string temp;
+                stringstream s2(full_instructions);
+                while (getline(s2, temp, ';')) {
+                    size_t p = temp.find_first_not_of(" \t\r\n");
+                    if (p != string::npos)
+                        ins_list.push_back(temp.substr(p));
+                }
+
+                if (ins_list.empty() || ins_list.size() > 50) {
+                    cout << "invalid command" << endl;
+                    continue;
+                }
+
+                // validate memory like -s
+                if (mem < 64 || mem > 65536 || (mem & (mem - 1)) != 0) {
+                    cout << "invalid memory allocation" << endl;
+                    continue;
+                }
+
+                auto p = create_process(pname);
+                p->memory_required = mem;
+
+                if (!mem_manager) {
+                    cout << "Memory manager not initialized. Run initialize first." << endl;
+                    continue;
+                }
+                if (!mem_manager->allocate_process(p, mem)) {
+                    cout << "Failed to allocate page table for process." << endl;
+                    continue;
+                }
+
+                if (free_memory.load() < mem) {
+                    cout << "Not enough memory available." << endl;
+                    continue;
+                }
+
+                used_memory += mem;
+                free_memory -= mem;
+
+                // ADD INSTRUCTIONS TO CODE
+                for (auto &i : ins_list)
+                    p->code.lines.push_back(i);
+
+                cout << "Process " << pname << " created with custom instructions." << endl;
+                continue;
+            }
+            else if (opt == "-ls") {
                 print_summary( cout);
             } else {
                  cout << "screen commands: -s <name> (create+attach), -r <name> (attach), -ls (list)" <<  endl;
@@ -499,6 +706,11 @@ static void run_main_menu() {
 
         if (root == "report-util") {
             save_report_util("csopesy-log.txt");
+            continue;
+        }
+
+        if (root == "vmstat") {
+            vmstat();
             continue;
         }
 

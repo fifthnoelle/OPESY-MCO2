@@ -1,0 +1,117 @@
+****************************************************************************************************************************
+
+General: 
+	1. System is limited to a maximum amount of main memory allocated by your original OS. Memory spaces are bound within your running program's memory address. Memory spaces are pre-allocated and free to use by any process upon startup
+		+ Memory space is limited to N-bytes, each process will utilize a fraction of the memory
+		+ Your memory manager must support backing store, operations when low in memory, context-switching processes in and out of backing store (READ/WRITE to file)
+	2. There must be a mechanism to visualize and debug memory. User can use either "process-smi" for high-level overview of available/used memory, or "vmstat" for fine-grained memory details
+		+ "process-smi is similar to "nvidia-smi"
+
+
+Additional Commands:
+
+process-smi = Summarized view of available/used memory and the list of processes and memory occupied. This is similar to 'nvidia-smi' comman
+
+vmstat = Detailed view of the active/inactive processes, available/used memory, and pages.
+	+ Used Memory - Total active memory used by processes
+	+ Free Memory = Total free memory that can still be used by other processes
+	+ Idle CPU Ticks = Number of ticks where CPU cores remained idle
+	+ Active CPU Ticks = Number of ticks where CPU cores are actually executing instructions
+	+ Total CPU Ticks = Number of ticks passed for all CPU cores
+	+ Num Paged In = Accumulated number of pages paged in
+	+ Num Paged Out = Accumulated number of pages paged out
+
+
+****************************************************************************************************************************
+
+
+Requirement 1: Memory Manager
+
+Needs 1:
+
+- Must support Demand Paging Allocator:
+	1. Pages are loaded into physical memory frames on demand
+	2. When a process references a virtual memory page that is currently not in a frame, page fault occurs and required page is brought from the backing store into a free frame. 
+	3. If no frames are free, a page replacement algorithm selects a page to be evicted to the backing store
+
+
+=================================
+
+
+Requirement 2: Memory visualization and backing store access
+
+Needs 2:
+
+- Application has some way to debug memory; such as "vmstat" and "process-smi"
+- Backing store is represented as a text file that can be accessed at any given time. Such is saved in a text file "csopesy-backing-store.txt" 
+
+
+=================================
+
+
+Requirement 3: Required memory per process
+
+Needs 3: 
+
+- New Command: 'screen -s <process_name>' --> 'screen -s <process_name> <process_size>'
+	+ Memory size is required
+	+ Created new processes with a given name and memory allovation
+
+- Considerations:
+	1. All memory ranges from 2^6 - 2^16 bytes, power of 2 format. Console should throw "invalid memory allocation" if user is outside of range
+	2. Sample: 'screen -s process1 256'
+	3. Process must require memory at least 64 bytes big
+
+
+=================================
+
+
+Requirement 4: Simulating memory access via process instruction
+
+Needs 4: 
+
+- There must be a mechanism to simulate memory access:
+	+ READ(var, memory_address) = Performs Retrieval of uint16 value from memory and stores it to var. If memory block isn't initialized, uint16 value is 0
+	+ WRITE(memory_address, value) = Writes uint16 value to the specified memory address
+
+- Considerations:
+	1. Variables are tied to processes, stored in memory, and will not be released until process finishes
+	2. uint16 variables are clamped between (0,max(uint16)) and consumes 2 bytes of memory
+	3. uint16 variables are stored in the symbol table segment of the process
+	4. Symbol Table segment has a fixed size of 64 bytes. Your program can store a maximum 32 variables. If limit is reached, succeeding variable declarations will be ignored
+	5. memory_address is  hexadecimal value:
+		+ READ my_var 0x1000 = Read uint16 value at address 0x1000 and store in my_var, 0 if uninitialized.
+		+ WRITE 0x2000 42 = Writes the unint16 value 42 to address 0x2000
+		+ READ my_var_2 0x2000 = Read uint16 value at address 0x1000 and store in my_var_2. Since address 0x2000 has already been initialized to 42, store into 42
+	6. Attempting to READ/WRITE to an invalid memory address will throw access violation error and shut down the procress akin to memory access violation error in user program.
+	7. Memory addresses and representation of memory are emulated. Not 1:1 mapping of physical memory/RAM when running the program
+	8. READ/WRITE memory operations are now included in generating process instructions via 'scheduler-start' command
+
+
+===================================
+
+
+Requirement 5: User Defined Instructions
+
+Needs 5: 
+
+- New Command: 'screen -c <process_name> <process_memory-size> "<instructions>"'
+	+ Sends a string of 1-50 instructions to be executed by the specified process. 
+	+ Instructions are semicolon-separated. Throws invalid command if instruction size is not met
+
+- Sample: 'screen -c process2 "DECLARE varA 10; DECLARE varB 5; ADD varA varA varB; WRITE 0x500 varA; READ varC 0x500; PRINT(\"Result:\" + varC)"'
+	
+
+====================================
+
+
+Requirement 6: Previous features from MO1 --> 
+
+Needs 6:
+
+- All implemented features with additionals focused on memory management and file system interface
+	1. If process name not found/finished for 'screen -s <process_name>' console prints "Process <process_name> not found"
+	2. If process name has prematurely shut down due to memory access violation; Console should print "Process <process_name> shut down due to memory access violation error that occurred at <HH:MM:SS>. <Hex memory address> invalid."
+
+****************************************************************************************************************************
+
