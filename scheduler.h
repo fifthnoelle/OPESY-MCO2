@@ -117,6 +117,12 @@ private:
                         free_memory -= mem;
                       }
             add_log(p, "Generated " + to_string(num_ins) + " randomized instructions");
+             // Load pages for this process to trigger demand paging
+ if (mem_manager && p->num_pages > 0) {
+   for (int page_idx = 0; page_idx < p->num_pages; ++page_idx) {
+     mem_manager->ensure_page_loaded(p, page_idx * mem_manager->frame_size());
+   }
+ }
             add_process(p);
         }
     }
