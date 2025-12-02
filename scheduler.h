@@ -111,7 +111,7 @@ private:
                // Allocate memory for this process (randomize between min and max)
                uint32_t mem = config.min_mem_per_proc + (rand() % (config.max_mem_per_proc - config.min_mem_per_proc + 1));
                p->memory_required = mem;
-               if (mem_manager {
+if (mem_manager) {
                         mem_manager->allocate_process(p, mem);
                         used_memory += mem;
                         free_memory -= mem;
