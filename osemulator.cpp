@@ -125,26 +125,47 @@ static void save_report_util(const  string &path) {
     cout << "Saved report to " << path <<  endl;
 }
 
-static void print_process(const  shared_ptr<ProcessStub>& p) {
+static void print_process(const shared_ptr<ProcessStub>& p) {
     if (!p) return;
-    CustomProcessLines cpl;
-    cout << "\nProcess name: " << p->name <<  endl;
-    cout << "ID: " << p->id <<  endl;
-    cout << "Logs: " <<  endl;
+    
+    cout << "\nProcess name: " << p->name << endl;
+    cout << "ID: " << p->id << endl;
+    cout << "Memory allocated: " << p->memory_required << " bytes" << endl;
+    cout << "Assigned core: " << (p->assigned_core.load() >= 0 ? to_string(p->assigned_core.load()) : "N/A") << endl;
+    cout << "Status: " << (p->finished.load() ? "Finished" : "Running") << endl;
+    cout << "Progress: " << p->current_instruction.load() << " / " << p->total_instructions << " instructions" << endl;
+    
+    double cpu_util = (p->total_instructions > 0) 
+        ? (100.0 * p->current_instruction.load()) / p->total_instructions 
+        : 0.0;
+    cout << "CPU Utilization: " << fixed << setprecision(1) << cpu_util << "%" << endl;
+    
+    cout << "\nLogs:" << endl;
     {
-        lock_guard< mutex> plk(p->mtx);
-        for (const auto &entry : p->logs) {
-            cout << "(" << entry.timestamp << ")";
-            cout << "\t\"" << entry.message << "\"" <<  endl;
+        lock_guard<mutex> plk(p->mtx);
+        if (p->logs.empty()) {
+            cout << "  (no logs)" << endl;
+        } else {
+            for (const auto &entry : p->logs) {
+                cout << "  (" << entry.timestamp << ") " << entry.message << endl;
+            }
         }
     }
-
-    cout << "\nLines of Code:\n";
-    for (size_t i = 0; i < p->code.lines.size(); ++i) {
-        cout << (i + 1) << "     " << p->code.lines[i] << endl;
+    
+    cout << "\nLines of Code:" << endl;
+    if (p->code.lines.empty()) {
+        cout << "  (no instructions)" << endl;
+    } else {
+        for (size_t i = 0; i < p->code.lines.size() && i < 20; ++i) {
+            cout << "  " << (i + 1) << ": " << p->code.lines[i] << endl;
+        }
+        if (p->code.lines.size() > 20) {
+            cout << "  ... (" << (p->code.lines.size() - 20) << " more lines)" << endl;
+        }
     }
     cout << endl;
 }
+
 
 //Run process interactive screen
 static void run_process_screen(const string& process_name) {
@@ -439,21 +460,40 @@ static void run_process_screen(const string& process_name) {
 }
 
 static void vmstat() {
-    cout << "===== VMSTAT =====\n";
-    cout << "Total Memory: " << total_memory.load() << " bytes\n";
-    cout << "Used Memory : " << used_memory.load() << " bytes\n";
-    cout << "Free Memory : " << free_memory.load() << " bytes\n\n";
-
-    cout << "CPU Ticks Summary:\n";
-    cout << "  Idle    : " << idle_ticks.load() << endl;
-    cout << "  Active  : " << active_ticks.load() << endl;
-    cout << "  Total   : " << total_ticks.load() << endl;
-
-    cout << "\nPaging:\n";
-    cout << "  Paged In : " << num_paged_in.load() << endl;
-    cout << "  Paged Out: " << num_paged_out.load() << endl;
-    cout << "===================\n";
+    uint64_t total_mem = total_memory.load();
+    uint64_t used_mem = used_memory.load();
+    uint64_t free_mem = free_memory.load();
+    
+    double mem_util = (total_mem > 0) ? (100.0 * used_mem) / total_mem : 0.0;
+    
+    cout << "\n===== VMSTAT (Memory & Paging Statistics) =====\n\n";
+    
+    cout << "Memory Summary:\n";
+    cout << "  Total Memory: " << total_mem << " bytes" << endl;
+    cout << "  Used Memory : " << used_mem << " bytes (" << fixed << setprecision(1) << mem_util << "%)" << endl;
+    cout << "  Free Memory : " << free_mem << " bytes" << endl;
+    
+    cout << "\nCPU Ticks Summary:\n";
+    cout << "  Idle Ticks  : " << idle_ticks.load() << endl;
+    cout << "  Active Ticks: " << active_ticks.load() << endl;
+    cout << "  Total Ticks : " << total_ticks.load() << endl;
+    
+    uint64_t total_cpu = total_ticks.load();
+    if (total_cpu > 0) {
+        double idle_pct = (100.0 * idle_ticks.load()) / total_cpu;
+        double active_pct = (100.0 * active_ticks.load()) / total_cpu;
+        cout << "  CPU Usage   : " << fixed << setprecision(1) << active_pct << "% (Idle: " << idle_pct << "%)" << endl;
+    }
+    
+    cout << "\nPaging Statistics:\n";
+    cout << "  Pages In  : " << num_paged_in.load() << endl;
+    cout << "  Pages Out : " << num_paged_out.load() << endl;
+    cout << "  Total Page Faults: " << (num_paged_in.load() + num_paged_out.load()) << endl;
+    
+    cout << "\n===============================================\n" << endl;
 }
+
+
 
 //Main menu loop
 static void run_main_menu() {
