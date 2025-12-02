@@ -698,6 +698,18 @@ static void run_main_menu() {
             continue;
         }
 
+        if (root == "scheduler-test") {
+            // Run scheduler for a single test batch - create processes once
+            if (scheduler_running.load()) {
+                cout << "Scheduler already running." << endl;
+            } else {
+                scheduler_running.store(true);
+                // Run batch_process_loop once to create a single batch of processes
+                if (scheduler) scheduler->batch_process_loop();
+                cout << "Scheduler test batch created." << endl;
+            }
+            continue;
+
         if (root == "scheduler-stop") {
             if (!scheduler || !scheduler->is_running()) {
                 cout << "Scheduler is not running." << endl;
