@@ -727,7 +727,7 @@ static void run_main_menu() {
     continue;
 }
 
-        cout << "Unknown command. Available: initialize, exit, screen, scheduler-start, scheduler-stop, report-util, vmstattat, vmstat, process-smi" << endl;<  endl;
+        cout << "Unknown command. Available: initialize, exit, screen, scheduler-start, scheduler-stop, report-util, vmstattat, vmstat, process-smi" << endl;
     }
 }
 
