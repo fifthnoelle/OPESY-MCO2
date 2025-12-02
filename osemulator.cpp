@@ -709,6 +709,8 @@ static void run_main_menu() {
                                 cout << "Scheduler test started." << endl;
             }
             continue;
+            }
+
 
         if (root == "scheduler-stop") {
             if (!scheduler || !scheduler->is_running()) {
