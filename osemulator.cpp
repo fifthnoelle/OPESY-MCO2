@@ -704,9 +704,9 @@ static void run_main_menu() {
                 cout << "Scheduler already running." << endl;
             } else {
                 scheduler_running.store(true);
-                // Run batch_process_loop once to create a single batch of processes
-                if (scheduler) scheduler->batch_process_loop();
-                cout << "Scheduler test batch created." << endl;
+// Run scheduler for test - can be stopped with scheduler-stop
+                if (scheduler) scheduler->start();
+                                cout << "Scheduler test started." << endl;
             }
             continue;
 
