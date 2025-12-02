@@ -250,11 +250,12 @@ private:
 
             p->assigned_core.store(core_id);
             add_log(p, "Core " + to_string(core_id) + ": Picked process " + p->name, core_id);
-             // Ensure symbol table page (0x0) is loaded for demand paging
+            // Ensure all process pages are loaded for demand paging
  if (mem_manager && p->num_pages > 0) {
-   mem_manager->ensure_page_loaded(p, 0);
+   for (int page_idx = 0; page_idx < p->num_pages; ++page_idx) {
+     mem_manager->ensure_page_loaded(p, page_idx * mem_manager->frame_size());
+   }
  }
-
             // Hybrid model: scheduler executes a limited set of instructions
             if (config.scheduler == "fcfs") {
                 // FCFS: run until completion
