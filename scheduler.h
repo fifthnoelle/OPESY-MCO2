@@ -108,6 +108,14 @@ private:
             auto p = create_process(pname);
             int num_ins = config.min_ins + (rand() % (config.max_ins - config.min_ins + 1));
             generate_dummy_instructions(p, num_ins);
+               // Allocate memory for this process (randomize between min and max)
+               uint32_t mem = config.min_mem_per_proc + (rand() % (config.max_mem_per_proc - config.min_mem_per_proc + 1));
+               p->memory_required = mem;
+               if (mem_manager && mem <= free_memory.load()) {
+                        mem_manager->allocate_process(p, mem);
+                        used_memory += mem;
+                        free_memory -= mem;
+                      }
             add_log(p, "Generated " + to_string(num_ins) + " randomized instructions");
             add_process(p);
         }
