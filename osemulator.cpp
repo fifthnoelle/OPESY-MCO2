@@ -496,6 +496,10 @@ static void run_main_menu() {
                 cout << " min-ins=" << global_config.min_ins <<  endl;
                 cout << " max-ins=" << global_config.max_ins <<  endl;
                 cout << " delay-per-exec=" << global_config.delay_per_exec <<  endl;
+                cout << " max-overall-mem=" << global_config.max_overall_mem <<  endl;
+                cout << " mem-per-frame=" << global_config.mem_per_frame <<  endl;
+                cout << " min-mem-per-proc=" << global_config.min_mem_per_proc <<  endl;
+                cout << " max-mem-per-proc=" << global_config.max_mem_per_proc <<  endl;
 
                 total_memory.store(global_config.max_overall_mem);
                 free_memory.store(global_config.max_overall_mem);

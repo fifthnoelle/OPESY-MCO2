@@ -113,7 +113,7 @@ inline string gen_auto_name() {
 }
 
 inline void generate_dummy_instructions(shared_ptr<ProcessStub> p, int num_instructions) {
-    static const vector<string> ops = {"DECLARE", "ADD", "SUBTRACT", "PRINT", "SLEEP", "FOR"};
+    static const vector<string> ops = {"DECLARE", "ADD", "SUBTRACT", "PRINT", "SLEEP", "FOR", "READ", "WRITE"};
     p->total_instructions = num_instructions;
     p->current_instruction.store(0);
     
@@ -136,6 +136,18 @@ inline void generate_dummy_instructions(shared_ptr<ProcessStub> p, int num_instr
             for (int j = 0; j < repeats; ++j) {
                 p->code.lines.push_back("PRINT \"FOR iteration " + to_string(j+1) + "\"");
             }
+        } else if (op == "READ") {
+            string var = "read_var_" + to_string(i);
+            uint32_t addr = 0x1000 + (rand() % 0x1000);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "READ %s 0x%x", var.c_str(), addr);
+            p->code.lines.push_back(string(buf));
+        } else if (op == "WRITE") {
+            uint32_t addr = 0x2000 + (rand() % 0x1000);
+            uint16_t val = rand() % 65536;
+            char buf[32];
+            snprintf(buf, sizeof(buf), "WRITE 0x%x %u", addr, val);
+            p->code.lines.push_back(string(buf));
         }
     }
 }

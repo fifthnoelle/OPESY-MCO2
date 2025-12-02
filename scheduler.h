@@ -196,8 +196,64 @@ private:
             add_log(p, "FOR start x" + to_string(n), core_id);
             this_thread::sleep_for(chrono::milliseconds(10 * min(5, n)));
             add_log(p, "FOR end", core_id);
+        } else if (op == "READ") {
+            string var, addrstr;
+            iss >> var >> addrstr;
+            if (var.empty() || addrstr.empty()) {
+                add_log(p, "Malformed READ instruction", core_id);
+                return;
+            }
+            uint32_t addr = 0;
+            try { addr = stoul(addrstr, nullptr, 0); } catch(...) {
+                add_log(p, "Invalid READ address: " + addrstr, core_id);
+                return;
+            }
+            if (!mem_manager) {
+                add_log(p, "Memory manager not available", core_id);
+                return;
+            }
+            uint16_t val = 0;
+            if (!mem_manager->read_u16(p, addr, val)) {
+                add_log(p, string("Memory access violation at ") + addrstr, core_id);
+                p->finished.store(true);
+                return;
+            }
+            {
+                lock_guard<mutex> lk(p->mtx);
+                if (p->vars.size() < 32) {
+                    p->vars[var] = val;
+                }
+            }
+            add_log(p, string("READ: ") + var + " <- " + to_string(val) + " from " + addrstr, core_id);
+        } else if (op == "WRITE") {
+            string addrstr, valstr;
+            iss >> addrstr >> valstr;
+            if (addrstr.empty() || valstr.empty()) {
+                add_log(p, "Malformed WRITE instruction", core_id);
+                return;
+            }
+            uint32_t addr = 0;
+            try { addr = stoul(addrstr, nullptr, 0); } catch(...) {
+                add_log(p, "Invalid WRITE address: " + addrstr, core_id);
+                return;
+            }
+            int v = 0;
+            try { v = stoi(valstr); } catch(...) {
+                add_log(p, "Invalid WRITE value: " + valstr, core_id);
+                return;
+            }
+            uint16_t uv = static_cast<uint16_t>(max(0, min(65535, v)));
+            if (!mem_manager) {
+                add_log(p, "Memory manager not available", core_id);
+                return;
+            }
+            if (!mem_manager->write_u16(p, addr, uv)) {
+                add_log(p, string("Memory access violation at ") + addrstr, core_id);
+                p->finished.store(true);
+                return;
+            }
+            add_log(p, string("WRITE: ") + addrstr + " <- " + to_string(uv), core_id);
         } else {
-            // Unknown or operations reserved for interactive session (READ/WRITE/DECLARE)
             add_log(p, string("Skipped instruction (not executed by scheduler): ") + op, core_id);
         }
     }
