@@ -66,12 +66,12 @@ static inline optional<string> load_config_from_file(const string &path, Config 
                 out.num_cpu = v;
             } 
             else if (key == "scheduler") {
-                // Remove quotes if present
+                //Remove quotes if present
                 if (!val.empty() && val.front() == '"' && val.back() == '"') {
                     val = val.substr(1, val.size() - 2);
                 }
                 
-                // Normalize to lowercase
+                //Normalize to lowercase
                 for (auto &c : val) c = tolower(c);
                 
                 if (val == "fcfs" || val == "rr") {
