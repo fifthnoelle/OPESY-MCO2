@@ -673,7 +673,21 @@ static void run_main_menu() {
             continue;
         }
 
-        cout << "Unknown command. Available: initialize, exit, screen, scheduler-start, scheduler-stop, report-util, vmstat" <<  endl;
+        if (root == "process-smi") {
+    lock_guard<mutex> lk(repository_mutex);
+    if (processes.empty()) {
+        cout << "No processes found." << endl;
+    } else {
+        cout << "\n===== PROCESS SUMMARY =====\n";
+        for (auto &kv : processes) {
+            print_process(kv.second);
+        }
+        cout << "==========================\n" << endl;
+    }
+    continue;
+}
+
+        cout << "Unknown command. Available: initialize, exit, screen, scheduler-start, scheduler-stop, report-util, vmstattat, vmstat, process-smi" << endl;<  endl;
     }
 }
 
