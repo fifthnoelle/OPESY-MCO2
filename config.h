@@ -107,18 +107,22 @@ static inline optional<string> load_config_from_file(const string &path, Config 
             else if (key == "max-overall-mem") {
                 uint32_t v = static_cast<uint32_t>(stoul(val));
                 out.max_overall_mem = v;
+                 if (v < 64) v = 64; if (v > 65536) v = 65536;
             }
             else if (key == "mem-per-frame") {
                 uint32_t v = static_cast<uint32_t>(stoul(val));
                 out.mem_per_frame = v;
+                 if (v < 64) v = 64; if (v > 65536) v = 65536;
             }
             else if (key == "min-mem-per-proc") {
                 uint32_t v = static_cast<uint32_t>(stoul(val));
                 out.min_mem_per_proc = v;
+                 if (v < 64) v = 64; if (v > 65536) v = 65536;
             }
             else if (key == "max-mem-per-proc") {
                 uint32_t v = static_cast<uint32_t>(stoul(val));
                 out.max_mem_per_proc = v;
+                 if (v < 64) v = 64; if (v > 65536) v = 65536;
             }
         } catch (...) {
             return optional<string>("parse-error");
